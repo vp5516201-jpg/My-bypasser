@@ -1,7 +1,6 @@
 const express = require('express');
 const puppeteer = require('puppeteer-extra');
 const StealthPlugin = require('puppeteer-extra-plugin-stealth');
-const chromium = require("@sparticuz/chromium");
 const axios = require('axios');
 const cors = require('cors');
 
@@ -24,44 +23,57 @@ async function updateProxies() {
 updateProxies();
 setInterval(updateProxies, 600000);
 
-const userAgents = [
-    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-    'Mozilla/5.0 (Linux; Android 10; SM-A205U) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.120 Mobile Safari/537.36'
-];
+// Helper function: Wait
+const wait = (ms) => new Promise(res => setTimeout(res, ms));
 
 async function bypassLink(url) {
     let browser = null;
     const proxy = proxyList[Math.floor(Math.random() * proxyList.length)];
-    const agent = userAgents[Math.floor(Math.random() * userAgents.length)];
-
+    
     if (!proxy) return { error: "Server Busy. Try Again." };
 
     try {
-        // LITE BROWSER LAUNCH CONFIG
+        // MEMORY SAVING MODE ON ⚡
         browser = await puppeteer.launch({
-            args: [...chromium.args, `--proxy-server=http://${proxy}`],
-            defaultViewport: chromium.defaultViewport,
-            executablePath: await chromium.executablePath(),
-            headless: chromium.headless,
-            ignoreHTTPSErrors: true
+            headless: 'new',
+            args: [
+                '--no-sandbox',
+                '--disable-setuid-sandbox',
+                '--disable-dev-shm-usage', // Memory full issue fix
+                '--disable-accelerated-2d-canvas',
+                '--no-first-run',
+                '--no-zygote',
+                '--single-process', // Important for Free Tier
+                '--disable-gpu',
+                `--proxy-server=http://${proxy}`
+            ]
         });
 
         const page = await browser.newPage();
-        await page.setUserAgent(agent);
-        page.setDefaultNavigationTimeout(60000);
+        
+        // Resource block karo taaki load kam pade (Images/Fonts)
+        await page.setRequestInterception(true);
+        page.on('request', (req) => {
+            if (['image', 'stylesheet', 'font'].includes(req.resourceType())) {
+                req.abort();
+            } else {
+                req.continue();
+            }
+        });
 
+        page.setDefaultNavigationTimeout(60000);
         await page.goto(url, { waitUntil: 'domcontentloaded' });
 
-        // Auto Scroll (Human Behavior)
+        // Scroll Logic (Human)
         await page.evaluate(async () => {
             await new Promise((resolve) => {
                 let totalHeight = 0;
-                const distance = 50;
+                const distance = 100;
                 const timer = setInterval(() => {
                     const scrollHeight = document.body.scrollHeight;
                     window.scrollBy(0, distance);
                     totalHeight += distance;
-                    if (totalHeight >= scrollHeight || totalHeight > 1000) {
+                    if (totalHeight >= scrollHeight || totalHeight > 2000) {
                         clearInterval(timer);
                         resolve();
                     }
@@ -69,7 +81,8 @@ async function bypassLink(url) {
             });
         });
 
-        await new Promise(r => setTimeout(r, 15000));
+        await wait(15000); // 15 sec wait
+
         const finalUrl = page.url();
         await browser.close();
         return { originalUrl: finalUrl };
